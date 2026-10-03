@@ -1,10 +1,14 @@
 ## test_client_smoke - smoke test for the TermAssertClient library.
 ##
-## Spins up a tiny Unix-socket server in the test process, exposes its
+## Spins up an independent Unix-socket peer in a forked child, exposes its
 ## path via $TERM_ASSERT_URI, then exercises connectHarness / ping /
 ## requestScreenshot / requestExit and verifies the wire protocol.
+##
+## The responder deliberately stubs TermAssert to provide an independent wire
+## oracle without a circular dependency. Socket operations, process isolation,
+## JSON parsing and the production client are real integration boundaries.
 
-import std/[unittest, json, os, posix, options]
+import std/[unittest, json, os, posix]
 import term_assert_client
 
 proc allocPath(): string =
@@ -25,6 +29,41 @@ proc startServer(path: string): cint =
   doAssert listen(sh, 1) == 0
   return sh.cint
 
+proc serveProtocol(lfd: cint) =
+  discard alarm(10)
+  let sh = posix.accept(SocketHandle(lfd), nil, nil)
+  doAssert sh.cint != -1
+  discard posix.close(lfd)
+  let cfd = sh.cint
+  defer: discard posix.close(cfd)
+  for expected in [%*{"cmd": "ping"},
+                   %*{"cmd": "screenshot", "label": "first"},
+                   %*{"cmd": "exit", "code": 0}]:
+    var line = ""
+    while true:
+      var ch: char
+      let n = posix.read(cfd, addr ch, 1)
+      doAssert n == 1
+      if ch == '\n': break
+      line.add ch
+    let parsed = parseJson(line)
+    doAssert parsed.kind == JObject
+    doAssert parsed.hasKey("cmd")
+    doAssert parsed == expected
+    var resp = %*{"ok": true}
+    if expected["cmd"].getStr == "ping": resp["pong"] = %true
+    let data = $resp & "\n"
+    var offset = 0
+    while offset < data.len:
+      let n = posix.write(cfd, unsafeAddr data[offset], data.len - offset)
+      doAssert n > 0
+      offset += n
+
+proc reap(pid: Pid; status: var cint): Pid =
+  while true:
+    result = waitpid(pid, status, 0)
+    if result != -1 or errno != EINTR: return
+
 suite "TermAssertClient smoke":
   test "connect + ping + screenshot + exit":
     let path = allocPath()
@@ -32,80 +71,45 @@ suite "TermAssertClient smoke":
     defer:
       discard posix.close(lfd)
       discard unlink(cstring(path))
+    let hadUri = existsEnv("TERM_ASSERT_URI")
+    let originalUri = getEnv("TERM_ASSERT_URI")
+    defer:
+      if hadUri: putEnv("TERM_ASSERT_URI", originalUri)
+      else: delEnv("TERM_ASSERT_URI")
     putEnv("TERM_ASSERT_URI", path)
 
-    # Spawn the client connection in this same process; the server side
-    # runs in a tiny accept loop.
+    # Fork before constructing the client or starting any test worker threads.
+    let child = fork()
+    doAssert child >= 0
+    if child == 0:
+      try:
+        serveProtocol(lfd)
+        exitnow(0)
+      except Exception:
+        exitnow(1)
+    var reaped = false
+    defer:
+      if not reaped:
+        discard kill(child, SIGKILL)
+        var status: cint
+        discard reap(child, status)
+
     var client = connectHarness()
-    var addrUn: Sockaddr_un
-    var alen = SockLen(sizeof(addrUn))
-    let sh = posix.accept(SocketHandle(lfd),
-                          cast[ptr SockAddr](addr addrUn), addr alen)
-    doAssert sh.cint != -1
-    let cfd = sh.cint
-    defer: discard posix.close(cfd)
-
-    # A line-by-line server. After every received command we send back
-    # `{"ok": true}` (plus pong for ping).
-    proc readReply(c: cint): string =
-      result = ""
-      while true:
-        var ch: char
-        let n = posix.read(c, addr ch, 1)
-        if n <= 0: break
-        if ch == '\n': break
-        result.add ch
-
-    proc reply(c: cint; payload: JsonNode) =
-      let s = $payload & "\n"
-      var off = 0
-      while off < s.len:
-        let n = posix.write(c, unsafeAddr s[off], s.len - off)
-        if n <= 0: break
-        off += n
-
-    # Ping
-    var senderThread: Thread[void]
-    discard senderThread
-
-    # Run the client requests in this thread, but read from the server
-    # side first to demonstrate. Use a simple alternation: invoke the
-    # client request via a helper and have the server immediately reply.
-    proc serverReplyTo(c: cint; pong: bool = false) =
-      let req = readReply(c)
-      let parsed = parseJson(req)
-      doAssert parsed.kind == JObject
-      doAssert parsed.hasKey("cmd")
-      var resp = newJObject()
-      resp["ok"] = newJBool(true)
-      if pong: resp["pong"] = newJBool(true)
-      reply(c, resp)
-
-    # We need the request and the reply to overlap. The test driver
-    # uses a small fork-style: prime the request in a fire-and-forget
-    # way, then service it.
-    when compileOption("threads"):
-      var srvThread: Thread[cint]
-      proc srvProcPing(c: cint) {.thread.} =
-        serverReplyTo(c, true)
-      createThread(srvThread, srvProcPing, cfd)
-      let pong = client.ping()
-      joinThread(srvThread)
-      check pong
-
-      proc srvProcSnap(c: cint) {.thread.} =
-        serverReplyTo(c)
-      createThread(srvThread, srvProcSnap, cfd)
-      client.requestScreenshot("first")
-      joinThread(srvThread)
-
-      proc srvProcExit(c: cint) {.thread.} =
-        serverReplyTo(c)
-      createThread(srvThread, srvProcExit, cfd)
-      client.requestExit(0)
-      joinThread(srvThread)
-
-      check client.isConnected
-    else:
-      skip()
-    delEnv("TERM_ASSERT_URI")
+    defer: client.close()
+    # Bound real transport operations without adding a production timeout API.
+    var timeout = Timeval(tv_sec: Time(5), tv_usec: Suseconds(0))
+    doAssert setsockopt(SocketHandle(client.fd), SOL_SOCKET, SO_RCVTIMEO,
+                       addr timeout, SockLen(sizeof(timeout))) == 0
+    doAssert setsockopt(SocketHandle(client.fd), SOL_SOCKET, SO_SNDTIMEO,
+                       addr timeout, SockLen(sizeof(timeout))) == 0
+    let pong = client.ping()
+    check pong
+    client.requestScreenshot("first")
+    client.requestExit(0)
+    check client.isConnected
+    var status: cint
+    let waited = reap(child, status)
+    reaped = waited == child
+    check waited == child
+    check WIFEXITED(status)
+    check WEXITSTATUS(status) == 0
