@@ -15,3 +15,7 @@ nimcache/
 
 # Written by the dev shell's git-hooks.nix hook (a symlink into /nix/store).
 .pre-commit-config.yaml
+
+# Generated Repro provider/cache metadata and typed build artifacts.
+.repro/
+build/

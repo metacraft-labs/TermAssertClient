@@ -86,7 +86,7 @@
             src = ./.;
             installPhase = ''
               mkdir -p $out
-              cp -R src term_assert_client.nimble README.md LICENSE $out/
+              cp -R src term_assert_client.nimble README.md AGENTS.md LICENSE $out/
             '';
           };
         };
