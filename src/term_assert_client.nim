@@ -68,7 +68,7 @@ proc connectHarness*(uri: string = ""): TuiTestClient =
     raiseClient("socket")
   let s = sh.cint
   var addrUn: Sockaddr_un
-  addrUn.sun_family = AF_UNIX.cushort
+  addrUn.sun_family = typeof(addrUn.sun_family)(AF_UNIX)
   if path.len >= sizeof(addrUn.sun_path):
     discard posix.close(s)
     raise newException(TuiTestClientError,
