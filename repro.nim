@@ -133,7 +133,10 @@ package term_assert_client:
     # ``gcc`` is the C back-end ``nim c`` shells out to and the linker.
     # Sufficient for the path-mode resolver under ``nix develop``.
     "nim >=2.0"
-    "gcc >=12"
+    when defined(macosx):
+      "clang"
+    else:
+      "gcc >=12"
 
   # Library declaration — the ``src/`` tree the tests put on ``--path`` is
   # importable when this package is consumed via
@@ -175,6 +178,8 @@ package term_assert_client:
         mm = "orc",
         extraInputs = @["src"],
         actionId = "term_assert_client.test_build." & stem)
+      when defined(macosx):
+        appendRegisteredActionToolIdentityRefs(edge.action.id, ["clang"])
       buildActions.add(edge.action)
       # ``registerImplicitName = false`` because the BUILD edge already owns
       # the binary basename as the implicit target name; the explicit
