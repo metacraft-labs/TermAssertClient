@@ -186,6 +186,8 @@ package term_assert_client:
         actionId = "term_assert_client.test_build." & stem)
       when defined(macosx):
         appendRegisteredActionToolIdentityRefs(edge.action.id, ["clang"])
+      elif defined(linux):
+        appendRegisteredActionToolIdentityRefs(edge.action.id, ["gcc"])
       buildActions.add(edge.action)
       # ``registerImplicitName = false`` because the BUILD edge already owns
       # the binary basename as the implicit target name; the explicit
