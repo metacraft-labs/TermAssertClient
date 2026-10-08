@@ -70,7 +70,16 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: reprobuild
+          repro-from-source: true
+          repro-build-pin: 76659f5730ecf698b1963c656494d2cb66eb256d
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Record engine and source identity
+        run: |
+          pwd
+          git rev-parse HEAD
+          command -v repro
+          repro --version
 
       - name: repro build
         # Builds the conventional `build` collection declared in
@@ -87,9 +96,13 @@ jobs:
         # Re-runs the legacy `just build` path inside the same env so
         # we catch silent divergences between `repro build` outputs
         # and what the dev shell + Justfile produce today.
+        env:
+          REPRO_TOOL_PROVISIONING: ${{ runner.os == 'Windows' && 'tarball' || 'nix' }}
         run: dev-exec just build
 
       - name: just test (cross-check)
+        env:
+          REPRO_TOOL_PROVISIONING: ${{ runner.os == 'Windows' && 'tarball' || 'nix' }}
         run: dev-exec just test
 
       # Diagnostics on failure. Three things below are load-bearing:
