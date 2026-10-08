@@ -67,26 +67,14 @@
 ## typed ``nim c`` surface, so it's omitted — the corpus compiles + runs
 ## identically without it.
 ##
-## **Per-test platform gating.** The single test, ``test_client_smoke.nim``,
-## ``import``s ``std/posix`` and builds a ``Sockaddr_un`` Unix-domain server
-## (``AF_UNIX`` / ``bindSocket`` / ``listen`` / ``accept``). That is a POSIX
-## construct — the file does not compile on Windows (no ``Sockaddr_un`` /
-## ``AF_UNIX`` in Nim's Windows ``std/posix`` surface). It carries no
-## in-test ``when defined(windows): skip()`` fallback (unlike nim-pty's
-## cross-platform test), so it is genuinely POSIX-only: gated
-## ``when not defined(windows)`` at extraction so the edge is present on
-## Linux/macOS (where it compiles + runs to exit 0) and simply absent from
-## the graph on Windows. On this Linux host the edge is in the graph and is
-## a real run. (The library ``src/`` itself is likewise POSIX-shaped, but
-## only the test needs an extraction gate — the ``library`` declaration is
-## a naming/visibility record, not a compile.)
+## **Native IPC transport.** The original smoke retains its Unix-domain peer
+## on Unix and executes a real independent named-pipe peer on Windows.
+## The same JSON oracle and action identifiers apply on every platform.
+## Windows additionally binds the test-only native deadline helper as an input.
 ##
-## The test stands up its Unix-socket server IN-PROCESS and services the
-## client requests from spawned ``Thread``s in the SAME process — it does
-## NOT fork/exec a child process or allocate a pty. So there is no
-## resource-contending subprocess/pty timing to serialize: no ``pool=`` /
-## ``buildPool`` is needed (unlike nim-pty, whose tests fork real children
-## and assert on sub-100ms read windows).
+## The independent peer runs in an owned separate process on both transports.
+## The smoke uses five-second operation and ten-second fixture bounds; no pty
+## or shared mutable resource requires a new named scheduling pool.
 ##
 ## **Tool provisioning.** ``defaultToolProvisioning "path"`` matches the
 ## canonical recipes: the nix dev shell puts ``nim`` + ``gcc`` on ``PATH``,
@@ -115,10 +103,8 @@ type
     source: string
     binary: string
 
-# POSIX-only test corpus — ``test_client_smoke.nim`` imports ``std/posix``
-# and builds a ``Sockaddr_un`` Unix-domain server, so it compiles + runs
-# only off Windows. Gated ``when not defined(windows)`` at extraction below.
-const posixTestSpecs: seq[ClientTestSpec] = @[
+# Native IPC smoke is runnable on every supported platform.
+const clientTestSpecs: seq[ClientTestSpec] = @[
   ClientTestSpec(source: "tests/test_client_smoke.nim",
     binary: "build/test-bin/test_client_smoke"),
 ]
@@ -176,17 +162,20 @@ package term_assert_client:
       let stem =
         if lastSlash >= 0: binary[lastSlash + 1 .. ^1]
         else: binary
+      var nativeInputs = @["src"]
+      when defined(windows):
+        nativeInputs.add("tests/windows_ipc_deadline.c")
       let edge = buildNimUnittest.build(
         source = source,
         binary = binary,
         defines = @["release"],
         paths = @["src"],
         mm = "orc",
-        extraInputs = @["src"],
+        extraInputs = nativeInputs,
         actionId = "term_assert_client.test_build." & stem)
       when defined(macosx):
         appendRegisteredActionToolIdentityRefs(edge.action.id, ["clang"])
-      elif defined(linux):
+      elif defined(linux) or defined(windows):
         appendRegisteredActionToolIdentityRefs(edge.action.id, ["gcc"])
       buildActions.add(edge.action)
       # ``registerImplicitName = false`` because the BUILD edge already owns
@@ -197,13 +186,10 @@ package term_assert_client:
         registerImplicitName = false)
       executeActions.add(executeEdge)
 
-    # POSIX-only tests — the smoke test's Unix-domain-socket server compiles
-    # + runs only off Windows; gated at extraction so it never enters the
-    # graph on Windows.
-    when not defined(windows):
-      for spec in posixTestSpecs:
-        emitTestPair(spec.source, spec.binary,
-          testBuildActions, testExecuteActions)
+    # Preserve the Unix smoke pair and materialize the same real pair on Windows.
+    for spec in clientTestSpecs:
+      emitTestPair(spec.source, spec.binary,
+        testBuildActions, testExecuteActions)
 
     discard collect("test", testExecuteActions)
     discard collect("test-builds", testBuildActions)
