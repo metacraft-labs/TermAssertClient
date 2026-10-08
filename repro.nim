@@ -137,6 +137,12 @@ package term_assert_client:
       "clang"
     else:
       "gcc >=12"
+    # Original Just cross-check command closure (Justfile shell and recipes).
+    "just >=1"
+    "bash >=4"
+    "mkdir"
+    "basename"
+    "tee"
 
   # Library declaration — the ``src/`` tree the tests put on ``--path`` is
   # importable when this package is consumed via

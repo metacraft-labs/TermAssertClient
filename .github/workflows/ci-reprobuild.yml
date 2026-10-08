@@ -96,9 +96,13 @@ jobs:
         # Re-runs the legacy `just build` path inside the same env so
         # we catch silent divergences between `repro build` outputs
         # and what the dev shell + Justfile produce today.
+        env:
+          REPRO_TOOL_PROVISIONING: ${{ runner.os == 'Windows' && 'tarball' || 'nix' }}
         run: dev-exec just build
 
       - name: just test (cross-check)
+        env:
+          REPRO_TOOL_PROVISIONING: ${{ runner.os == 'Windows' && 'tarball' || 'nix' }}
         run: dev-exec just test
 
       # Diagnostics on failure. Three things below are load-bearing:
