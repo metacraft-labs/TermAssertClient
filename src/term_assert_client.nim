@@ -23,118 +23,204 @@
 ##
 ## Public API rules
 ## ----------------
-## * `TuiTestClient` is a value `object` with an owning Unix-socket FD.
+## * `TuiTestClient` owns a Unix-socket FD or a private Windows pipe HANDLE.
 ## * `=copy` is disabled; `=destroy` releases the FD.
 ## * No raw `ptr` is exposed.
 
-import std/[json, os, posix, options]
+import std/[json, os, options]
+when defined(windows):
+  import std/[winlean, widestrs]
+else:
+  import std/posix
 
 type
   TuiTestClient* = object
     ## Owning handle for one connection to the harness IPC socket.
-    fd*: cint
+    when defined(windows):
+      pipeHandle: Handle
+    else:
+      fd*: cint
     closed*: bool
 
   TuiTestClientError* = object of CatchableError
 
 proc `=copy`*(dest: var TuiTestClient; src: TuiTestClient) {.error.}
 
-when defined(gcDestructors):
-  proc `=destroy`*(c: TuiTestClient) =
-    if not c.closed and c.fd > 2:
-      discard posix.close(c.fd)
-else:
-  proc `=destroy`*(c: var TuiTestClient) =
-    if not c.closed and c.fd > 2:
-      discard posix.close(c.fd)
+when defined(windows):
+  const errorBrokenPipe = 109
 
-proc raiseClient(ctx: string) {.noreturn.} =
-  raise newException(TuiTestClientError,
-    ctx & ": " & osErrorMsg(osLastError()) & " (errno=" & $int(osLastError()) & ")")
+  proc releasePipe(c: TuiTestClient) =
+    if not c.closed and c.pipeHandle != Handle(0) and
+        c.pipeHandle != INVALID_HANDLE_VALUE:
+      discard closeHandle(c.pipeHandle)
 
-proc connectHarness*(uri: string = ""): TuiTestClient =
-  ## Connect to the TermAssert harness socket. Defaults to reading the
-  ## URI from `$TERM_ASSERT_URI`. Raises `TuiTestClientError` on connect
-  ## failure.
-  var path = uri
-  if path.len == 0:
-    path = getEnv("TERM_ASSERT_URI")
-  if path.len == 0:
-    raise newException(TuiTestClientError,
-      "TERM_ASSERT_URI is empty; pass a URI explicitly or run under the harness")
+  when defined(gcDestructors):
+    proc `=destroy`*(c: TuiTestClient) = releasePipe(c)
+  else:
+    proc `=destroy`*(c: var TuiTestClient) = releasePipe(c)
 
-  let sh = posix.socket(AF_UNIX, SOCK_STREAM, 0)
-  if sh.cint == -1:
-    raiseClient("socket")
-  let s = sh.cint
-  var addrUn: Sockaddr_un
-  addrUn.sun_family = AF_UNIX.cushort
-  if path.len >= sizeof(addrUn.sun_path):
-    discard posix.close(s)
-    raise newException(TuiTestClientError,
-      "URI too long for sockaddr_un: " & path)
-  copyMem(addr addrUn.sun_path[0], cstring(path), path.len)
-  addrUn.sun_path[path.len] = '\0'
-  if connect(sh, cast[ptr SockAddr](addr addrUn),
-             SockLen(sizeof(addrUn))) == -1:
-    let e = osLastError()
-    discard posix.close(s)
-    raise newException(TuiTestClientError,
-      "connect(" & path & "): " & osErrorMsg(e))
-  result = TuiTestClient(fd: s, closed: false)
+  proc raiseWindowsClient(ctx: string; code: OSErrorCode) {.noreturn.} =
+    raise newException(TuiTestClientError, ctx & ": " & osErrorMsg(code) &
+      " (win32=" & $int(code) & ")")
 
-proc isConnected*(c: TuiTestClient): bool {.inline.} =
-  not c.closed and c.fd >= 0
+  proc connectHarness*(uri: string = ""): TuiTestClient =
+    var path = uri
+    if path.len == 0: path = getEnv("TERM_ASSERT_URI")
+    if path.len == 0:
+      raise newException(TuiTestClientError,
+        "TERM_ASSERT_URI is empty; pass a URI explicitly or run under the harness")
+    if path.len < 10 or path[0 .. 8] != "\\\\.\\pipe\\" or '\0' in path:
+      raise newException(TuiTestClientError, "URI must name a local Windows pipe")
+    let widePath = newWideCString(path)
+    let handle = createFileW(widePath, GENERIC_READ or GENERIC_WRITE, 0,
+      nil, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, Handle(0))
+    if handle == INVALID_HANDLE_VALUE:
+      let code = osLastError()
+      raiseWindowsClient("CreateFileW(" & path & ")", code)
+    result = TuiTestClient(pipeHandle: handle, closed: false)
 
-proc close*(c: var TuiTestClient) =
-  if not c.closed and c.fd > 2:
-    discard posix.close(c.fd)
-    c.fd = -1
+  proc isConnected*(c: TuiTestClient): bool {.inline.} =
+    not c.closed and c.pipeHandle != Handle(0) and
+      c.pipeHandle != INVALID_HANDLE_VALUE
+
+  proc close*(c: var TuiTestClient) =
+    releasePipe(c)
+    c.pipeHandle = Handle(0)
     c.closed = true
 
-proc writeAll(fd: cint; data: string) =
-  var off = 0
-  while off < data.len:
-    let n = posix.write(fd, unsafeAddr data[off], data.len - off)
-    if n < 0:
-      let e = osLastError()
-      if cint(e) == EINTR: continue
-      raiseClient("write")
-    if n == 0:
-      raise newException(TuiTestClientError, "short write")
-    off += n
+  proc writeAll(handle: Handle; data: string) =
+    var offset = 0
+    while offset < data.len:
+      var count: int32
+      let chunk = min(data.len - offset, int(high(int32)))
+      if writeFile(handle, unsafeAddr data[offset], int32(chunk), addr count, nil) == 0:
+        let code = osLastError()
+        raiseWindowsClient("WriteFile", code)
+      if count <= 0:
+        raise newException(TuiTestClientError, "short write")
+      offset += int(count)
 
-proc readLine(fd: cint): string =
-  ## Read until newline; up to 64 KiB. Used to read the JSON reply.
-  result = ""
-  var byte0: char
-  for i in 0 ..< 65536:
-    let n = posix.read(fd, addr byte0, 1)
-    if n < 0:
-      let e = osLastError()
-      if cint(e) == EINTR: continue
-      raiseClient("read")
-    if n == 0:
-      return result
-    if byte0 == '\n':
-      return result
-    result.add byte0
+  proc readLine(handle: Handle): string =
+    result = ""
+    for i in 0 ..< 65536:
+      var ch: char
+      var count: int32
+      if readFile(handle, addr ch, 1, addr count, nil) == 0:
+        let code = osLastError()
+        if int(code) == errorBrokenPipe: return result
+        raiseWindowsClient("ReadFile", code)
+      if count == 0 or ch == '\n': return result
+      result.add ch
 
-proc sendCmd*(c: var TuiTestClient; payload: JsonNode): JsonNode =
-  ## Send `payload` as one line, read one line back, return the parsed
-  ## reply.
-  if not c.isConnected:
-    raise newException(TuiTestClientError, "client is not connected")
-  let line = $payload & "\n"
-  writeAll(c.fd, line)
-  let reply = readLine(c.fd)
-  if reply.len == 0:
-    raise newException(TuiTestClientError, "harness closed connection")
-  try:
-    return parseJson(reply)
-  except CatchableError as e:
+  proc sendCmd*(c: var TuiTestClient; payload: JsonNode): JsonNode =
+    if not c.isConnected:
+      raise newException(TuiTestClientError, "client is not connected")
+    writeAll(c.pipeHandle, $payload & "\n")
+    let reply = readLine(c.pipeHandle)
+    if reply.len == 0:
+      raise newException(TuiTestClientError, "harness closed connection")
+    try:
+      return parseJson(reply)
+    except CatchableError as e:
+      raise newException(TuiTestClientError,
+        "failed to parse harness reply: " & e.msg & " | line=" & reply)
+else:
+  when defined(gcDestructors):
+    proc `=destroy`*(c: TuiTestClient) =
+      if not c.closed and c.fd > 2:
+        discard posix.close(c.fd)
+  else:
+    proc `=destroy`*(c: var TuiTestClient) =
+      if not c.closed and c.fd > 2:
+        discard posix.close(c.fd)
+
+  proc raiseClient(ctx: string) {.noreturn.} =
     raise newException(TuiTestClientError,
-      "failed to parse harness reply: " & e.msg & " | line=" & reply)
+      ctx & ": " & osErrorMsg(osLastError()) & " (errno=" & $int(osLastError()) & ")")
+
+  proc connectHarness*(uri: string = ""): TuiTestClient =
+    ## Connect to the TermAssert harness socket. Defaults to reading the
+    ## URI from `$TERM_ASSERT_URI`. Raises `TuiTestClientError` on connect
+    ## failure.
+    var path = uri
+    if path.len == 0:
+      path = getEnv("TERM_ASSERT_URI")
+    if path.len == 0:
+      raise newException(TuiTestClientError,
+        "TERM_ASSERT_URI is empty; pass a URI explicitly or run under the harness")
+
+    let sh = posix.socket(AF_UNIX, SOCK_STREAM, 0)
+    if sh.cint == -1:
+      raiseClient("socket")
+    let s = sh.cint
+    var addrUn: Sockaddr_un
+    addrUn.sun_family = typeof(addrUn.sun_family)(AF_UNIX)
+    if path.len >= sizeof(addrUn.sun_path):
+      discard posix.close(s)
+      raise newException(TuiTestClientError,
+        "URI too long for sockaddr_un: " & path)
+    copyMem(addr addrUn.sun_path[0], cstring(path), path.len)
+    addrUn.sun_path[path.len] = '\0'
+    if connect(sh, cast[ptr SockAddr](addr addrUn),
+               SockLen(sizeof(addrUn))) == -1:
+      let e = osLastError()
+      discard posix.close(s)
+      raise newException(TuiTestClientError,
+        "connect(" & path & "): " & osErrorMsg(e))
+    result = TuiTestClient(fd: s, closed: false)
+
+  proc isConnected*(c: TuiTestClient): bool {.inline.} =
+    not c.closed and c.fd >= 0
+
+  proc close*(c: var TuiTestClient) =
+    if not c.closed and c.fd > 2:
+      discard posix.close(c.fd)
+      c.fd = -1
+      c.closed = true
+
+  proc writeAll(fd: cint; data: string) =
+    var off = 0
+    while off < data.len:
+      let n = posix.write(fd, unsafeAddr data[off], data.len - off)
+      if n < 0:
+        let e = osLastError()
+        if cint(e) == EINTR: continue
+        raiseClient("write")
+      if n == 0:
+        raise newException(TuiTestClientError, "short write")
+      off += n
+
+  proc readLine(fd: cint): string =
+    ## Read until newline; up to 64 KiB. Used to read the JSON reply.
+    result = ""
+    var byte0: char
+    for i in 0 ..< 65536:
+      let n = posix.read(fd, addr byte0, 1)
+      if n < 0:
+        let e = osLastError()
+        if cint(e) == EINTR: continue
+        raiseClient("read")
+      if n == 0:
+        return result
+      if byte0 == '\n':
+        return result
+      result.add byte0
+
+  proc sendCmd*(c: var TuiTestClient; payload: JsonNode): JsonNode =
+    ## Send `payload` as one line, read one line back, return the parsed
+    ## reply.
+    if not c.isConnected:
+      raise newException(TuiTestClientError, "client is not connected")
+    let line = $payload & "\n"
+    writeAll(c.fd, line)
+    let reply = readLine(c.fd)
+    if reply.len == 0:
+      raise newException(TuiTestClientError, "harness closed connection")
+    try:
+      return parseJson(reply)
+    except CatchableError as e:
+      raise newException(TuiTestClientError,
+        "failed to parse harness reply: " & e.msg & " | line=" & reply)
 
 proc requestScreenshot*(c: var TuiTestClient; label: string) =
   ## Ask the harness to capture the current parsed screen under `label`.
