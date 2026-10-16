@@ -107,6 +107,8 @@ type
 const clientTestSpecs: seq[ClientTestSpec] = @[
   ClientTestSpec(source: "tests/test_client_smoke.nim",
     binary: "build/test-bin/test_client_smoke"),
+  ClientTestSpec(source: "tests/test_nimcache_is_worktree_local.nim",
+    binary: "build/test-bin/test_nimcache_is_worktree_local"),
 ]
 
 package term_assert_client:
@@ -162,7 +164,7 @@ package term_assert_client:
       let stem =
         if lastSlash >= 0: binary[lastSlash + 1 .. ^1]
         else: binary
-      var nativeInputs = @["src"]
+      var nativeInputs = @["src", "config.nims"]
       when defined(windows):
         nativeInputs.add("tests/windows_ipc_deadline.c")
       let edge = buildNimUnittest.build(
@@ -183,7 +185,11 @@ package term_assert_client:
       # ``actionId`` is the execute edge's selector (two-edge shape).
       let executeEdge = edge.testBinary.run(
         actionId = "term_assert_client.test_execute." & stem,
-        registerImplicitName = false)
+        registerImplicitName = false,
+        requiredBinaries = (if source == "tests/test_nimcache_is_worktree_local.nim":
+          @["nim"] else: @[]),
+        extraInputs = (if source == "tests/test_nimcache_is_worktree_local.nim":
+          @["config.nims", "term_assert_client.nimble", "src", source] else: @[]))
       executeActions.add(executeEdge)
 
     # Preserve the Unix smoke pair and materialize the same real pair on Windows.

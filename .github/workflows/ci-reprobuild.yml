@@ -71,7 +71,7 @@ jobs:
         with:
           env-flavor: reprobuild
           repro-from-source: true
-          repro-build-pin: 76659f5730ecf698b1963c656494d2cb66eb256d
+          repro-build-pin: 064daf5b154ea6a0758ddb2dcbcbc07685216e44
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Record engine and source identity
