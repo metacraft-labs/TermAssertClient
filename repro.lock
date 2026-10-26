@@ -3,7 +3,7 @@ schema = "reprobuild.solved-graph-lock.v2"
 [lock]
 platform = "amd64-linux"
 optimal = false
-inputs_digest = "fnv1a64:2ef42ae3e3b2ae8e"
+inputs_digest = "fnv1a64:1585d7d3ce36ee2c"
 variants = []
-packages = [{ name = "gcc", version = "12.0.0", source = "gcc" }, { name = "nim", version = "2.0.0", source = "nim" }, { name = "term_assert_client", version = "0.1.0", source = "term_assert_client" }]
-deps = [{ name = "TermAssertClient", path = ".", coord_kind = "vcs", url = "", ref = "mcr-stege0-and-fixes", revision = "e8acd0a7de639431cf1ff212f5e69be92932af7a", integrity = "git-sha1:e8acd0a7de639431cf1ff212f5e69be92932af7a", version = "", visibility = "public", participation = "", depends = "", groups = "" }]
+packages = [{ name = "basename", version = "1.0.0", source = "basename", selection = "selected" }, { name = "bash", version = "4.0.0", source = "bash", selection = "selected" }, { name = "gcc", version = "12.0.0", source = "gcc", selection = "selected" }, { name = "just", version = "1.0.0", source = "just", selection = "selected" }, { name = "mkdir", version = "1.0.0", source = "mkdir", selection = "selected" }, { name = "nim", version = "2.0.0", source = "nim", selection = "selected" }, { name = "tee", version = "1.0.0", source = "tee", selection = "selected" }, { name = "term_assert_client", version = "0.1.0", source = "term_assert_client", selection = "selected" }]
+deps = [{ name = "TermAssertClient", path = ".", coord_kind = "vcs", url = "https://github.com/metacraft-labs/TermAssertClient", ref = "agents-to-dev-2026-10-03", revision = "4b0382ab5c4fc1b684bcafa8bdd3eacfb82f2ab8", integrity = "git-sha1:4b0382ab5c4fc1b684bcafa8bdd3eacfb82f2ab8", version = "", visibility = "public", participation = "", depends = "", tags = "" }]
