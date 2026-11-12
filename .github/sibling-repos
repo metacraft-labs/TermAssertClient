@@ -1,2 +1,5 @@
-# Cross-repo siblings cloned by setup-dev-env at workspace-lock-pinned
-# revisions (see codetracer-specs/Testing/Cross-Repo-CI-Integration.md).
+# Cross-repo siblings that setup-dev-env clones beside this checkout.
+# This file names the siblings only. Each sibling's revision comes from the
+# workspace lock recorded for the commit under test, so CI builds against the
+# same sibling revisions the commit was developed with; never add a revision
+# or branch pin here.

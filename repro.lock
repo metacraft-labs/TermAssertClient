@@ -1,4 +1,4 @@
-schema = "reprobuild.solved-graph-lock.v2"
+schema = "reprobuild.solved-graph-lock.v3"
 
 [lock]
 platform = "amd64-linux"
@@ -6,4 +6,4 @@ optimal = false
 inputs_digest = "fnv1a64:1585d7d3ce36ee2c"
 variants = []
 packages = [{ name = "basename", version = "1.0.0", source = "basename", selection = "selected" }, { name = "bash", version = "4.0.0", source = "bash", selection = "selected" }, { name = "gcc", version = "12.0.0", source = "gcc", selection = "selected" }, { name = "just", version = "1.0.0", source = "just", selection = "selected" }, { name = "mkdir", version = "1.0.0", source = "mkdir", selection = "selected" }, { name = "nim", version = "2.0.0", source = "nim", selection = "selected" }, { name = "tee", version = "1.0.0", source = "tee", selection = "selected" }, { name = "term_assert_client", version = "0.1.0", source = "term_assert_client", selection = "selected" }]
-deps = [{ name = "TermAssertClient", path = ".", coord_kind = "vcs", url = "https://github.com/metacraft-labs/TermAssertClient", ref = "agents-to-dev-2026-10-03", revision = "4b0382ab5c4fc1b684bcafa8bdd3eacfb82f2ab8", integrity = "git-sha1:4b0382ab5c4fc1b684bcafa8bdd3eacfb82f2ab8", version = "", visibility = "public", participation = "", depends = "", tags = "" }]
+deps = [{ name = "TermAssertClient", self = "true", coord_kind = "vcs", url = "https://github.com/metacraft-labs/TermAssertClient", revision = "146e0a51894f55eb793c3ffc0948b243f1d4b78c", integrity = "git-sha1:146e0a51894f55eb793c3ffc0948b243f1d4b78c", version = "", visibility = "public", participation = "", depends = "", tags = "" }]
