@@ -4,10 +4,12 @@ name: CI (reprobuild)
 # deterministic dev env through reprobuild instead of `nix develop` or
 # `env.ps1`. Runs alongside the existing `ci.yml` (`nix`) and any
 # `windows-build.yml` (`windows-diy`) entries so regressions in either
-# of the older paths still gate merges — see
-# `codetracer-specs/Repo-Requirements.md` §2.9 and
-# `metacraft-dev-guidelines/policies/ci-shared-dev-env.md` §4 for the
-# rollout shape.
+# of the older paths still gate merges. The reprobuild run is additive,
+# not a replacement: it checks that the `repro.nim` recipe stays in step
+# with the Nix dev shell and `env.ps1`, so `repro build` / `repro test`
+# must build and run what `just build` / `just test` do, on all five
+# platforms. An older flavor leaves the CI matrix only once reprobuild is
+# the documented dev path on that OS.
 #
 # The `setup-dev-env` composite action accepts `env-flavor: reprobuild`
 # (target state per the policy). When the action's reprobuild branch
