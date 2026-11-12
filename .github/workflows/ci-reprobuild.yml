@@ -94,6 +94,16 @@ jobs:
           repro-io-mon-pin: 7a9b2f331024f4bc0b952bcab89b1dc48525d804
           repro-stackable-hooks-pin: c1d55ce33fb2a29e4cf8d8bdbe1713f355370d0a
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # The installation token above expires one hour after it is minted,
+          # and building reprobuild from source takes about that long on its
+          # own: the linux-x64 job on e5e9c1b minted it at 19:03 and its first
+          # `repro exec` fetched nixpkgs at 20:09, which GitHub answered with
+          # `401 Bad credentials`. These two inputs start setup-dev-env's job
+          # credential broker, which re-mints the Nix GitHub credential before
+          # it expires for the rest of the job (not on Windows, which has no
+          # Nix). Git's credential is not covered; see the refresh steps below.
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Record engine and source identity
         run: |
@@ -102,6 +112,19 @@ jobs:
           command -v repro
           repro --version
 
+      - name: Refresh authentication before repro build
+        # The broker keeps Nix's credential fresh, but the Git credential
+        # setup-dev-env installs is still the token minted at job start,
+        # frozen into each step's environment, so a Git fetch of a private
+        # metacraft-labs repository after the first hour fails. Re-mint it
+        # before each phase, as setup-dev-env's README directs; with the
+        # broker running, these steps leave Nix's credential to the broker.
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: repro build
         # Builds the conventional `build` collection declared in
         # `repro.nim`. Verifies the primary shipping artefact (the
@@ -109,9 +132,23 @@ jobs:
         # reprobuild engine identically to `just build`.
         run: dev-exec repro build
 
+      - name: Refresh authentication before repro test
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
       - name: repro test
         # Materialises the `test` collection.
         run: dev-exec repro test
+
+      - name: Refresh authentication before just build (cross-check)
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
       - name: just build (cross-check)
         # Re-runs the legacy `just build` path inside the same env so
@@ -120,6 +157,13 @@ jobs:
         env:
           REPRO_TOOL_PROVISIONING: ${{ runner.os == 'Windows' && 'tarball' || 'nix' }}
         run: dev-exec just build
+
+      - name: Refresh authentication before just test (cross-check)
+        uses: metacraft-labs/metacraft-github-actions/refresh-build-auth@dev
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
 
       - name: just test (cross-check)
         env:
