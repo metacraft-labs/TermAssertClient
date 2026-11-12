@@ -24,8 +24,9 @@
 ## So the ``uses:`` block is just the toolchain floor and there is no
 ## ``uses: "<sibling>"`` edge.
 ##
-## A Mode 1 / Mode 3 hybrid (per
-## ``reprobuild-specs/Three-Mode-Convention-System.md``) modelled on the
+## A minimal curated recipe: it declares only the package, its ``uses:``
+## floor and the edges conventions cannot infer, and leaves sources and
+## test discovery to the layout (``src/``, ``tests/``). It is modelled on the
 ## canonical ``runquota/repro.nim`` / ``nim-stackable-hooks/repro.nim`` /
 ## ``nim-pty/repro.nim`` recipes:
 ##
@@ -40,8 +41,10 @@
 ## * Emits, per runnable test file under ``tests/``, a BUILD edge
 ##   (``buildNimUnittest.build``) that compiles ``build/test-bin/<stem>``
 ##   and an EXECUTE edge (``edge.testBinary.run``) that runs it — the
-##   two-edge test template from ``reprobuild-specs/Package-Model.md``
-##   §"The test template". BUILD halves collect into ``test-builds``;
+##   two-edge test template: compiling a test and running it are separate
+##   actions, so a cached test binary is reused when only its run is
+##   re-requested, and the run's result is recorded apart from the
+##   compile's. BUILD halves collect into ``test-builds``;
 ##   EXECUTE halves collect into ``test`` so ``repro build test`` /
 ##   ``repro test`` materialise the runnable closure.
 ##
