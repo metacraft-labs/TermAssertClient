@@ -80,18 +80,18 @@ jobs:
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: reprobuild
-          # Reprobuild v0.2.31, built from source: that release publishes no
+          # Reprobuild v0.2.35, built from source: that release publishes no
           # Linux ARM64 bundle, so an installed release (repro-version) would
           # leave the linux-arm64 leg without an engine. The bootstrap sources
           # the action would otherwise take from their floating `dev` are held
-          # at the revisions v0.2.31's own flake.lock pins, so the engine CI
+          # at the revisions v0.2.35's own flake.lock pins, so the engine CI
           # builds is the release: RunQuota on every leg, io-mon and
           # nim-stackable-hooks on the Windows legs. The Linux/macOS legs
           # already take io-mon from that flake.lock.
           repro-from-source: true
-          repro-build-pin: 7618e3cb21ce17f5c86fbd290f501d60d52e9be1
+          repro-build-pin: 2e0c670b3a9f35e24d33a6235cc98de6d76ec3dd
           repro-runquota-pin: 6ff973131e7f715f0237cb0f08b8dd16cbeba0dc
-          repro-io-mon-pin: 8b8faa81bb0cad5d2d91fae80ceaaa7092782ec2
+          repro-io-mon-pin: b1c32599f9cd671b150f68de2b21bdc9ae0c42be
           repro-stackable-hooks-pin: c34e3252d413361a0f250d8921e00c119d30e114
           gh-token: ${{ steps.ci_token.outputs.token }}
           # The installation token above expires one hour after it is minted,
